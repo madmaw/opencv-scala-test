@@ -1,4 +1,4 @@
-import java.awt.{Dimension, Color}
+import java.awt.{Graphics2D, BasicStroke, Dimension, Color}
 import java.io.{File, ByteArrayInputStream}
 import java.util
 import javax.imageio.ImageIO
@@ -230,6 +230,7 @@ object OpenCVScalaTest {
     val faceDetector = new CascadeClassifier(getClass.getResource("haarcascade_frontalface_default.xml").getPath)
     val leftEyeDetector = new CascadeClassifier(getClass.getResource("haarcascade_mcs_lefteye.xml").getPath)
     val rightEyeDetector = new CascadeClassifier(getClass.getResource("haarcascade_mcs_righteye.xml").getPath)
+    val noseDetector = new CascadeClassifier(getClass.getResource("haarcascade_mcs_nose.xml").getPath)
 
     val thread = new Thread(new Runnable {
       override def run(): Unit = {
@@ -263,6 +264,36 @@ object OpenCVScalaTest {
           var faceCount = 0;
           val faces = new Array[Face](faceRectsArray.length)
           for( faceRect <- faceRectsArray ) {
+
+            val noseRect = new Rect(
+              faceRect.x + faceRect.width/3,
+              faceRect.y + faceRect.height/4,
+              faceRect.width/3,
+              faceRect.height/2
+            )
+            val noseMat = new Mat(mat, noseRect)
+            val noseRects = new MatOfRect()
+            noseDetector.detectMultiScale(
+              noseMat,
+              noseRects,
+              1.1,
+              2,
+              Objdetect.CASCADE_FIND_BIGGEST_OBJECT | Objdetect.CASCADE_SCALE_IMAGE,
+              new Size(20, 20),
+              new Size()
+            )
+            var nose: Rect = null;
+            var noseRectArray = noseRects.toArray
+            if( noseRectArray.length > 0 ) {
+              nose = noseRectArray(0)
+              nose = new Rect(
+                nose.x + noseRect.x,
+                nose.y + noseRect.y,
+                nose.width,
+                nose.height
+              )
+            }
+
             val leftEyeSampleRect = new Rect(
               faceRect.x,
               (faceRect.y + faceRect.height/4.5).toInt,
@@ -290,15 +321,18 @@ object OpenCVScalaTest {
               //Imgproc.cvtColor(new Mat(leftEyeFaceMat, leftEyeRect), leftEyeMat, Imgproc.COLOR_RGB2GRAY);
 
               val circles = new Mat();
+              val mean = Core.mean(leftEyeMat)
 
+              val pupil = analyseIris(leftEyeFaceMat, leftEyeRect, 1, 0.6, true);
               //Core.bitwise_not(leftEyeMat, leftEyeMat)
-              //Imgproc.adaptiveThreshold(leftEyeMat, leftEyeMat, 255, Imgproc.ADAPTIVE_THRESH_MEAN_C, Imgproc.THRESH_BINARY, 11, 2)
+              //Imgproc.adaptiveThreshold(leftEyeMat, leftEyeMat, 255, Imgproc.ADAPTIVE_THRESH_MEAN_C, Imgproc.THRESH_BINARY, 17, 3)
+              //Imgproc.threshold(leftEyeMat, leftEyeMat, mean.`val`(0), 255, Imgproc.THRESH_BINARY)
               //Imgproc.blur(leftEyeMat, leftEyeMat, new Size(3, 3))
-              //Imgproc.Canny(leftEyeMat, leftEyeMat, 100, 255)
+              //Imgproc.Canny(leftEyeMat, leftEyeMat, 90, 255)
 
 //              val contours = new util.ArrayList[MatOfPoint]();
-//              Imgproc.findContours(leftEyeMat, contours, new Mat(), Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
-//              Imgproc.drawContours(leftEyeMat, contours, -1, new Scalar(255, 255, 255))
+//              Imgproc.findContours(leftEyeMat, contours, new Mat(), Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
+//              Imgproc.drawContours(leftEyeMat, contours, -1, new Scalar(128, 128, 128), -1)
 //              Imgproc.HoughCircles(
 //                leftEyeMat,
 //                circles,
@@ -316,7 +350,8 @@ object OpenCVScalaTest {
               var pupilCX = leftEyeRect.width/2;
               var pupilCY = leftEyeRect.height/2;
               var pupilR = 0;
-              val pupil = analyseIris(leftEyeFaceMat, leftEyeRect, 1, 0.6, true);
+              //val pupil = analyseIris(leftEyeFaceMat, leftEyeRect, 1, 0.6, true);
+              //val pupil: Eye = null
               if( pupil != null ) {
                 pupilCX = leftEyeSampleRect.x + pupil.x + pupil.width/2;
                 pupilCY = leftEyeSampleRect.y + pupil.y + pupil.height/2;
@@ -365,7 +400,15 @@ object OpenCVScalaTest {
               );
             }
 
-            val face = new Face(faceRect.x, faceRect.y, faceRect.width, faceRect.height, leftEye, rightEye)
+            val face = new Face(
+              faceRect.x,
+              faceRect.y,
+              faceRect.width,
+              faceRect.height,
+              leftEye,
+              rightEye,
+              nose
+            )
             faces(faceCount) = face;
             faceCount = faceCount + 1;
           }
@@ -389,6 +432,9 @@ object OpenCVScalaTest {
                 first = false
               }
               val graphics = view.getGraphics
+              graphics match {
+                case g2: Graphics2D => g2.setStroke(new BasicStroke(3))
+              }
               graphics.drawImage(image, 0, 0, null)
 
               for( face <- faces ) {
@@ -404,10 +450,31 @@ object OpenCVScalaTest {
                     face.leftEye.pupilR * 2,
                     face.leftEye.pupilR * 2
                   );
+                  if( face.nose != null ) {
+
+                    val nx = face.nose.x + face.nose.width / 2
+                    val ny = face.nose.y + face.nose.height / 2
+
+                    graphics.setColor(Color.RED)
+                    val dx = face.leftEye.pupilCX - nx
+                    val dy = face.leftEye.pupilCY - ny
+
+                    graphics.drawLine(
+                      nx,
+                      ny,
+                      nx + dx,
+                      ny + dy
+                    )
+                    println("("+dx+","+dy+")")
+                  }
                 }
                 if( face.rightEye != null ) {
-                  graphics.setColor(Color.BLUE);
+                  graphics.setColor(Color.BLUE)
                   graphics.drawRect(face.rightEye.x, face.rightEye.y, face.rightEye.width, face.rightEye.height)
+                }
+                if( face.nose != null ) {
+                  graphics.setColor(Color.YELLOW)
+                  graphics.drawRect(face.nose.x, face.nose.y, face.nose.width, face.nose.height)
                 }
 
               }
